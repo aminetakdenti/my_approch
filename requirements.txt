@@ -5,3 +5,4 @@ torch
 black
 scikit-learn
 torchvision
+seaborn

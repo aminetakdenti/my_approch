@@ -1,0 +1,10 @@
+mnist_training
+models
+logs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyd
+viz_env
+data/MNIST
