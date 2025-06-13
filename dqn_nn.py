@@ -49,42 +49,6 @@ class DQNModel(nn.Module):
         x = F.softmax(self.fc3(x), dim=1)
         return x
 
-class CNNDQNModel(nn.Module):
-    def __init__(self, input_channels, height, width, output_dim):
-        super(CNNDQNModel, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=8, stride=4)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
-        
-        # Calculate the size after convolutions
-        conv_out_size = self._get_conv_out_size(input_channels, height, width)
-        
-        self.fc1 = nn.Linear(conv_out_size, 512)
-        self.fc2 = nn.Linear(512, output_dim)
-        
-    def _get_conv_out_size(self, channels, height, width):
-        # Helper to calculate output size after convolutions
-        x = torch.zeros(1, channels, height, width)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        return int(np.prod(x.size()))
-        
-    def forward(self, x):
-        # Reshape input if needed: (batch, features) -> (batch, channels, height, width)
-        if len(x.shape) == 2:
-            # Assuming square images, adjust as needed
-            side = int(np.sqrt(x.shape[1]))
-            x = x.view(-1, 1, side, side)
-            
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = x.view(x.size(0), -1)  # Flatten
-        x = F.relu(self.fc1(x))
-        x = F.softmax(self.fc2(x), dim=1)
-        return x
-
 class DataLoader:
     def __init__(self, csv_filepath, batch_size):
         self.df_samples = pd.read_csv(csv_filepath)  # Create a pandas dataframe
