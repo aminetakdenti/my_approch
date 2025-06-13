@@ -639,4 +639,5 @@ def run_dqn_example():
 
 if __name__ == "__main__":
     # Run the example
+    print("here")
     dqn_model, data_loader = run_dqn_example()
