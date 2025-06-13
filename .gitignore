@@ -1,5 +1,4 @@
 mnist_training
-models
 logs
 __pycache__
 *.pyc

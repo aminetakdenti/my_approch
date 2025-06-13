@@ -1,37 +1,24 @@
-.PHONY: setup create-dataset run-hybrid-dqn run-all clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs
+.PHONY: clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs
 
-# Setup
-setup:
-	mkdir -p src/utils src/logs data/raw data/processed data/external models/cnn models/dqn models/hybrid logs/cnn logs/dqn logs/hybrid
 
 # Installation
 install:
 	pip install -r requirements.txt
 	pip install -e .
 
-# Dataset creation
-create-dataset: setup
-	python src/data/preprocessing.py
-
 # Training commands
-train-cnn: setup
-	python src/training/train_cnn.py
+train-cnn:
+	python src/models/train_dqn_cnn.py
 
-train-dqn: setup
-	python src/training/train_dqn.py
-
-train-hybrid: setup
-	python src/training/train_hybrid.py
+train-dqn:
+	python src/training/train_dqn_nn.py
 
 # Running models
-run-cnn: setup
-	python src/models/cnn.py
+run-cnn:
+	python src/models/dqn_cnn.py
 
-run-dqn: setup
-	python src/models/dqn.py
-
-run-hybrid: setup
-	python src/models/hybrid.py
+run-dqn:
+	python src/models/dqn_nn.py
 
 # Testing
 test:
@@ -42,10 +29,6 @@ lint:
 	flake8 src/
 	black src/
 	isort src/
-
-# Documentation
-docs:
-	cd docs && make html
 
 # Cleanup
 clean:
@@ -62,6 +45,3 @@ clean:
 
 # Development
 dev: install lint test
-
-# All
-all: setup install test lint docs
