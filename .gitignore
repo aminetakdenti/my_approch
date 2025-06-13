@@ -5,5 +5,7 @@ __pycache__
 *.pyo
 *.pyd
 *.pyd
+*.pth
 viz_env
 data/MNIST
+plots/*

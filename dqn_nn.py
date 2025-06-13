@@ -6,14 +6,21 @@ import numpy as np
 import pandas as pd
 import random
 from sklearn.metrics import precision_score, recall_score
+import matplotlib.pyplot as plt
+from typing import List, Tuple
+from datetime import datetime
+import os
 
 # Hyperparameters
-LEARNING_RATE = 0.01  # Gradient-descent learning rate
-EPSILON = 0.8  # Epsilon value for the epsilon greedy policy selection
+LEARNING_RATE = 0.001  # Reduced learning rate for better stability
+EPSILON_START = 1.0  # Start with full exploration
+EPSILON_END = 0.01  # Minimum exploration rate
+EPSILON_DECAY = 0.995  # Decay rate for epsilon
 LAMBDA = 0.01  # Discount factor for loss calculation
-EPOCHS = 10  # Number of training epochs
-BATCH_SIZE = 128  # Default batch size
+EPOCHS = 50  # Increased number of epochs
+BATCH_SIZE = 64  # Smaller batch size for better generalization
 TRAIN_SPLIT_PERCENT = 0.8  # Percentage of the data for training, rest for testing
+EARLY_STOPPING_PATIENCE = 5  # Number of epochs to wait before early stopping
 
 # Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -22,13 +29,23 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class DQNModel(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(DQNModel, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
+        self.bn1 = nn.BatchNorm1d(input_dim)
+        self.fc1 = nn.Linear(input_dim, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.dropout1 = nn.Dropout(0.3)
+        self.fc2 = nn.Linear(256, 128)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.dropout2 = nn.Dropout(0.2)
         self.fc3 = nn.Linear(128, output_dim)
 
     def forward(self, x):
+        x = self.bn1(x)
         x = F.relu(self.fc1(x))
+        x = self.bn2(x)
+        x = self.dropout1(x)
         x = F.relu(self.fc2(x))
+        x = self.bn3(x)
+        x = self.dropout2(x)
         x = F.softmax(self.fc3(x), dim=1)
         return x
 
@@ -149,10 +166,27 @@ class DeepQNet:
         self.data = dataset  # Storing the data in our QNet
         self.input_dim = dataset.feature_dim  # State feature dim
         self.output_dim = dataset.actions_classes
+        self.epsilon = EPSILON_START
+        self.training_history = {
+            'losses': [],
+            'accuracies': [],
+            'epsilons': [],
+            'learning_rates': []
+        }
 
         print("here shape: ", self.input_dim, self.output_dim)
         self.model = self.create_model()  # Main DQN model
         self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
+        
+        # Fixed scheduler configuration
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='max',
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6
+        )
+        
         self.criterion = nn.CrossEntropyLoss()
 
         # Used to count when to update target network with main network's weights
@@ -212,107 +246,177 @@ class DeepQNet:
         next_states = batch[:, self.data.feature_dim + 1 :]
         return current_states, optimal_actions, next_states
 
-    def train(self, save_path=None):
+    def update_epsilon(self):
+        self.epsilon = max(EPSILON_END, self.epsilon * EPSILON_DECAY)
 
-        losses = []
-        accuracies = []
-        batches = self.data.train_batches  # Get the batches
+    def plot_training_metrics(self, save_path: str = None):
+        """
+        Plot training metrics including loss, accuracy, epsilon, and learning rate.
+        
+        Args:
+            save_path (str, optional): Directory to save the plot. If None, will use 'plots' directory.
+        """
+        # Use a default style
+        plt.style.use('default')
+        
+        # Create figure with a white background
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+        fig.patch.set_facecolor('white')
+        
+        # Plot Loss
+        ax1.plot(self.training_history['losses'], label='Training Loss', color='blue', linewidth=2)
+        ax1.set_title('Training Loss Over Time', fontsize=12, pad=10)
+        ax1.set_xlabel('Batch', fontsize=10)
+        ax1.set_ylabel('Loss', fontsize=10)
+        ax1.legend(fontsize=10)
+        ax1.grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot Accuracy
+        ax2.plot(self.training_history['accuracies'], label='Training Accuracy', color='green', linewidth=2)
+        ax2.set_title('Training Accuracy Over Time', fontsize=12, pad=10)
+        ax2.set_xlabel('Batch', fontsize=10)
+        ax2.set_ylabel('Accuracy', fontsize=10)
+        ax2.legend(fontsize=10)
+        ax2.grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot Epsilon
+        ax3.plot(self.training_history['epsilons'], label='Epsilon', color='red', linewidth=2)
+        ax3.set_title('Epsilon Value Over Time', fontsize=12, pad=10)
+        ax3.set_xlabel('Epoch', fontsize=10)
+        ax3.set_ylabel('Epsilon', fontsize=10)
+        ax3.legend(fontsize=10)
+        ax3.grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot Learning Rate
+        ax4.plot(self.training_history['learning_rates'], label='Learning Rate', color='purple', linewidth=2)
+        ax4.set_title('Learning Rate Over Time', fontsize=12, pad=10)
+        ax4.set_xlabel('Epoch', fontsize=10)
+        ax4.set_ylabel('Learning Rate', fontsize=10)
+        ax4.legend(fontsize=10)
+        ax4.grid(True, linestyle='--', alpha=0.7)
+        
+        # Adjust layout and spacing
+        plt.tight_layout(pad=3.0)
+        
+        # Create plots directory if it doesn't exist
+        if save_path is None:
+            save_path = 'plots'
+        os.makedirs(save_path, exist_ok=True)
+        
+        # Generate timestamp for unique filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        plot_path = os.path.join(save_path, f'training_metrics_{timestamp}.png')
+        
+        # Save the plot
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Training metrics plot saved to: {plot_path}")
+        return plot_path
 
-        self.model.train()  # Set model to training mode
+    def train(self, save_path=None, plot_dir='plots'):
+        try:
+            losses = []
+            accuracies = []
+            best_accuracy = 0
+            patience_counter = 0
+            batches = self.data.train_batches
 
-        for epoch in range(EPOCHS):
+            self.model.train()
 
-            for batch_idx, batch in enumerate(batches):  # Looping over the batches
-                current_states, optimal_actions, next_states = self.process_batch(batch)
+            for epoch in range(EPOCHS):
+                epoch_losses = []
+                epoch_accuracies = []
 
-                # Convert to tensors
-                current_states_tensor = torch.FloatTensor(current_states).to(device)
-                next_states_tensor = torch.FloatTensor(next_states).to(device)
-                optimal_actions_tensor = torch.LongTensor(optimal_actions).to(device)
+                for batch_idx, batch in enumerate(batches):
+                    current_states, optimal_actions, next_states = self.process_batch(batch)
 
-                # Prediction on S(t)
-                estimated_qs_vec_t = self.model(current_states_tensor)
-                estimated_qs_vec_t_np = estimated_qs_vec_t.detach().cpu().numpy()
-                predicted_actions_t = self.greedy(
-                    estimated_qs_vec_t_np, epsilon=EPSILON
-                )  # Predict the actions based on epsilon-greedy algorithm
-                rewards_t = self.get_reward(
-                    predicted_actions_t, optimal_actions
-                )  # Get the reward for each sample, the variable here unused because the rewarding phenomenon
-                # is already done implicitly down while putting 1's in the q_values of optimal actions
+                    current_states_tensor = torch.FloatTensor(current_states).to(device)
+                    next_states_tensor = torch.FloatTensor(next_states).to(device)
+                    optimal_actions_tensor = torch.LongTensor(optimal_actions).to(device)
 
-                # Prediction on S(t+1)
-                with torch.no_grad():
-                    estimated_qs_vec_t_plus_one = self.model(next_states_tensor)
-                    estimated_qs_vec_t_plus_one_np = (
-                        estimated_qs_vec_t_plus_one.cpu().numpy()
-                    )
-                    predicted_actions_t_plus_one = self.greedy(
-                        estimated_qs_vec_t_plus_one_np, epsilon=1.0
-                    )  # Taking the always argmax (epsilon = 1.0)
+                    estimated_qs_vec_t = self.model(current_states_tensor)
+                    estimated_qs_vec_t_np = estimated_qs_vec_t.detach().cpu().numpy()
+                    predicted_actions_t = self.greedy(estimated_qs_vec_t_np, epsilon=self.epsilon)
+                    rewards_t = self.get_reward(predicted_actions_t, optimal_actions)
 
-                    # An np.arange object to access all rows, for vectorization
-                    all_rows_idx = np.arange(estimated_qs_vec_t_plus_one_np.shape[0])
+                    with torch.no_grad():
+                        estimated_qs_vec_t_plus_one = self.model(next_states_tensor)
+                        estimated_qs_vec_t_plus_one_np = estimated_qs_vec_t_plus_one.cpu().numpy()
+                        predicted_actions_t_plus_one = self.greedy(estimated_qs_vec_t_plus_one_np, epsilon=1.0)
+                        all_rows_idx = np.arange(estimated_qs_vec_t_plus_one_np.shape[0])
+                        q_cap_t_plus_one = estimated_qs_vec_t_plus_one_np[all_rows_idx, predicted_actions_t_plus_one]
 
-                    # Prediction with S(t+1) and a_cap(t+1)
-                    q_cap_t_plus_one = estimated_qs_vec_t_plus_one_np[
-                        all_rows_idx, predicted_actions_t_plus_one
-                    ]  # Getting the q_values for the next predicted actions
+                    qref = np.zeros_like(estimated_qs_vec_t_np)
+                    qref[all_rows_idx, optimal_actions] = 1
+                    qref[all_rows_idx, predicted_actions_t] += LAMBDA * q_cap_t_plus_one
+                    qref_softmax = np.zeros_like(qref)
+                    qref_softmax[all_rows_idx, qref.argmax(1)] = 1
 
-                # Calculation of qref
-                qref = np.zeros_like(
-                    estimated_qs_vec_t_np
-                )  # Set the qref shape and initialize as zeros
-                qref[all_rows_idx, optimal_actions] = (
-                    1  # Setting 1 to all values that correspond to the action of maximum value.
-                )
-                qref[all_rows_idx, predicted_actions_t] += (
-                    LAMBDA * q_cap_t_plus_one
-                )  # qref = rt + qcap_t+1
-                qref_softmax = np.zeros_like(
-                    qref
-                )  # Softmax here is just for intuition, while what we do here is a hard max.
-                qref_softmax[all_rows_idx, qref.argmax(1)] = (
-                    1  # Replace the max value of the function by 1, all others by zeros. To act like classifier
-                )
+                    qref_softmax_tensor = torch.FloatTensor(qref_softmax).to(device)
 
-                # Convert target to tensor
-                qref_softmax_tensor = torch.FloatTensor(qref_softmax).to(device)
+                    self.optimizer.zero_grad()
+                    loss = self.criterion(estimated_qs_vec_t, qref_softmax_tensor)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    self.optimizer.step()
 
-                # Calculate loss and update
-                self.optimizer.zero_grad()
-                loss = self.criterion(estimated_qs_vec_t, qref_softmax_tensor)
-                loss = F.cross_entropy(estimated_qs_vec_t, qref_softmax_tensor)
-                loss.backward()
+                    with torch.no_grad():
+                        predictions = torch.argmax(estimated_qs_vec_t, dim=1)
+                        targets = torch.argmax(qref_softmax_tensor, dim=1)
+                        accuracy = (predictions == targets).float().mean().item()
 
-                # Gradient clipping (equivalent to clipnorm=1.0 in TensorFlow)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    epoch_losses.append(loss.item())
+                    epoch_accuracies.append(accuracy)
 
-                self.optimizer.step()
+                    # Store metrics for plotting
+                    self.training_history['losses'].append(loss.item())
+                    self.training_history['accuracies'].append(accuracy)
+                    self.training_history['epsilons'].append(self.epsilon)
+                    self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
 
-                # Calculate accuracy
-                with torch.no_grad():
-                    predictions = torch.argmax(estimated_qs_vec_t, dim=1)
-                    targets = torch.argmax(qref_softmax_tensor, dim=1)
-                    accuracy = (predictions == targets).float().mean().item()
+                    print(" -------------------------------------------------- ")
+                    print(f"In epoch {epoch + 1}/{EPOCHS}, batch {batch_idx + 1}/{self.data.n_train_batches}:")
+                    print(f"Accuracy: {accuracy:.4f}")
+                    print(f"Loss: {loss.item():.4f}")
+                    print(f"Epsilon: {self.epsilon:.4f}")
+                    print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
+                    print(" -------------------------------------------------- ")
 
-                losses.append(loss.item())
-                accuracies.append(accuracy)
+                # Update epsilon after each epoch
+                self.update_epsilon()
 
-                print(" -------------------------------------------------- ")
-                print(
-                    "In epoch {}/{} epochs, batch {}/{} batches:".format(
-                        epoch + 1, EPOCHS, batch_idx + 1, self.data.n_train_batches
-                    )
-                )
-                print("Accuracy: {}".format(accuracy))
-                print("Loss: {}".format(loss.item()))
-                print(" -------------------------------------------------- ")
+                # Calculate epoch metrics
+                avg_epoch_accuracy = np.mean(epoch_accuracies)
+                avg_epoch_loss = np.mean(epoch_losses)
+                
+                # Update learning rate based on accuracy
+                self.scheduler.step(avg_epoch_accuracy)
+                
+                # Early stopping check
+                if avg_epoch_accuracy > best_accuracy:
+                    best_accuracy = avg_epoch_accuracy
+                    patience_counter = 0
+                    if save_path is not None:
+                        self.save_model(save_path)
+                else:
+                    patience_counter += 1
+                    if patience_counter >= EARLY_STOPPING_PATIENCE:
+                        print(f"Early stopping triggered after {epoch + 1} epochs")
+                        break
 
-        if save_path is not None:
-            self.save_model(save_path)
+                losses.extend(epoch_losses)
+                accuracies.extend(epoch_accuracies)
 
-        return losses, accuracies
+                # Plot training metrics every few epochs
+                if (epoch + 1) % 2 == 0:
+                    self.plot_training_metrics(plot_dir)
+
+            return losses, accuracies
+            
+        except Exception as e:
+            print(f"An error occurred during training: {str(e)}")
+            raise
 
     def test(self):
         batches = self.data.test_batches
