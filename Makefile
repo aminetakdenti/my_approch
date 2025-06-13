@@ -4,21 +4,20 @@
 # Installation
 install:
 	pip install -r requirements.txt
-	pip install -e .
 
 # Training commands
 train-cnn:
-	python src/models/train_dqn_cnn.py
+	python train_dqn_cnn.py
 
 train-dqn:
-	python src/training/train_dqn_nn.py
+	python train_dqn_nn.py
 
 # Running models
 run-cnn:
-	python src/models/dqn_cnn.py
+	python dqn_cnn.py
 
 run-dqn:
-	python src/models/dqn_nn.py
+	python dqn_nn.py
 
 # Testing
 test:

@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from cnn_models import CNNModel, CNNTrainer
+from dqn_cnn import CNNModel, CNNTrainer
 
 class CSVDataset(Dataset):
     def __init__(self, features, labels):
