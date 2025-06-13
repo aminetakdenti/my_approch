@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import random
 from sklearn.metrics import precision_score, recall_score
-import matplotlib.pyplot as plt
+from model_utils import ModelVisualizer, ModelLogger
 from typing import List, Tuple
 from datetime import datetime
 import os
@@ -249,78 +249,17 @@ class DeepQNet:
     def update_epsilon(self):
         self.epsilon = max(EPSILON_END, self.epsilon * EPSILON_DECAY)
 
-    def plot_training_metrics(self, save_path: str = None):
-        """
-        Plot training metrics including loss, accuracy, epsilon, and learning rate.
-        
-        Args:
-            save_path (str, optional): Directory to save the plot. If None, will use 'plots' directory.
-        """
-        # Use a default style
-        plt.style.use('default')
-        
-        # Create figure with a white background
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        fig.patch.set_facecolor('white')
-        
-        # Plot Loss
-        ax1.plot(self.training_history['losses'], label='Training Loss', color='blue', linewidth=2)
-        ax1.set_title('Training Loss Over Time', fontsize=12, pad=10)
-        ax1.set_xlabel('Batch', fontsize=10)
-        ax1.set_ylabel('Loss', fontsize=10)
-        ax1.legend(fontsize=10)
-        ax1.grid(True, linestyle='--', alpha=0.7)
-        
-        # Plot Accuracy
-        ax2.plot(self.training_history['accuracies'], label='Training Accuracy', color='green', linewidth=2)
-        ax2.set_title('Training Accuracy Over Time', fontsize=12, pad=10)
-        ax2.set_xlabel('Batch', fontsize=10)
-        ax2.set_ylabel('Accuracy', fontsize=10)
-        ax2.legend(fontsize=10)
-        ax2.grid(True, linestyle='--', alpha=0.7)
-        
-        # Plot Epsilon
-        ax3.plot(self.training_history['epsilons'], label='Epsilon', color='red', linewidth=2)
-        ax3.set_title('Epsilon Value Over Time', fontsize=12, pad=10)
-        ax3.set_xlabel('Epoch', fontsize=10)
-        ax3.set_ylabel('Epsilon', fontsize=10)
-        ax3.legend(fontsize=10)
-        ax3.grid(True, linestyle='--', alpha=0.7)
-        
-        # Plot Learning Rate
-        ax4.plot(self.training_history['learning_rates'], label='Learning Rate', color='purple', linewidth=2)
-        ax4.set_title('Learning Rate Over Time', fontsize=12, pad=10)
-        ax4.set_xlabel('Epoch', fontsize=10)
-        ax4.set_ylabel('Learning Rate', fontsize=10)
-        ax4.legend(fontsize=10)
-        ax4.grid(True, linestyle='--', alpha=0.7)
-        
-        # Adjust layout and spacing
-        plt.tight_layout(pad=3.0)
-        
-        # Create plots directory if it doesn't exist
-        if save_path is None:
-            save_path = 'plots'
-        os.makedirs(save_path, exist_ok=True)
-        
-        # Generate timestamp for unique filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        plot_path = os.path.join(save_path, f'training_metrics_{timestamp}.png')
-        
-        # Save the plot
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print(f"Training metrics plot saved to: {plot_path}")
-        return plot_path
-
-    def train(self, save_path=None, plot_dir='plots'):
+    def train(self, save_path=None, plot_dir='logs'):
         try:
             losses = []
             accuracies = []
             best_accuracy = 0
             patience_counter = 0
             batches = self.data.train_batches
+
+            # Log training start
+            ModelLogger.log_training_start(EPOCHS, device, "DQN Model")
+            ModelLogger.log_model_summary(self.model)
 
             self.model.train()
 
@@ -375,13 +314,15 @@ class DeepQNet:
                     self.training_history['epsilons'].append(self.epsilon)
                     self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
 
-                    print(" -------------------------------------------------- ")
-                    print(f"In epoch {epoch + 1}/{EPOCHS}, batch {batch_idx + 1}/{self.data.n_train_batches}:")
-                    print(f"Accuracy: {accuracy:.4f}")
-                    print(f"Loss: {loss.item():.4f}")
-                    print(f"Epsilon: {self.epsilon:.4f}")
-                    print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
-                    print(" -------------------------------------------------- ")
+                    # Log batch metrics
+                    metrics = {
+                        'epochs': EPOCHS,
+                        'accuracy': accuracy,
+                        'loss': loss.item(),
+                        'epsilon': self.epsilon,
+                        'learning_rate': self.optimizer.param_groups[0]['lr']
+                    }
+                    ModelLogger.log_metrics(metrics, epoch, batch_idx, len(batches))
 
                 # Update epsilon after each epoch
                 self.update_epsilon()
@@ -410,7 +351,18 @@ class DeepQNet:
 
                 # Plot training metrics every few epochs
                 if (epoch + 1) % 2 == 0:
-                    self.plot_training_metrics(plot_dir)
+                    ModelVisualizer.plot_training_metrics(
+                        self.training_history,
+                        save_dir=plot_dir,
+                        prefix='dqn_'
+                    )
+
+            # Log training end
+            final_metrics = {
+                'final_accuracy': best_accuracy,
+                'final_loss': np.mean(losses[-len(batches):])
+            }
+            ModelLogger.log_training_end(best_accuracy, final_metrics)
 
             return losses, accuracies
             
@@ -420,62 +372,56 @@ class DeepQNet:
 
     def test(self):
         batches = self.data.test_batches
+        all_predictions = []
+        all_targets = []
 
-        accuracy = 0
-        f1_score = 0
-        precision = 0
-        recall = 0
-
-        self.model.eval()  # Set model to evaluation mode
+        self.model.eval()
 
         with torch.no_grad():
-            for batch_idx, batch in enumerate(batches):  # Looping over the batches
-                current_states, optimal_actions, _ = self.process_batch(
-                    batch
-                )  # Get the data from the batch
-
-                # Convert to tensor
+            for batch_idx, batch in enumerate(batches):
+                current_states, optimal_actions, _ = self.process_batch(batch)
                 current_states_tensor = torch.FloatTensor(current_states).to(device)
 
                 estimated_qs_vec = self.model(current_states_tensor)
                 estimated_qs_vec_np = estimated_qs_vec.cpu().numpy()
-                predicted_actions = self.greedy(
-                    estimated_qs_vec_np, epsilon=1.0
-                ).squeeze()  # Since we are testing so we need no exploration, we are only greedy now (eps=1.0)
+                predicted_actions = self.greedy(estimated_qs_vec_np, epsilon=1.0).squeeze()
 
-                curr_batch_accuracy = np.mean(
-                    np.equal(predicted_actions, optimal_actions).astype(np.uint32)
-                )
-                curr_batch_precision = precision_score(
-                    optimal_actions,
-                    predicted_actions,
-                    labels=self.data.actions_set,
-                    average="weighted",
-                    zero_division=1,
-                )
-                curr_batch_recall = recall_score(
-                    optimal_actions,
-                    predicted_actions,
-                    labels=self.data.actions_set,
-                    average="weighted",
-                    zero_division=1,
-                )
-                curr_batch_f1 = 2 * (
-                    (curr_batch_precision * curr_batch_recall)
-                    / (curr_batch_precision + curr_batch_recall + 1e-7)
-                )
+                all_predictions.extend(predicted_actions)
+                all_targets.extend(optimal_actions)
 
-                accuracy += curr_batch_accuracy / len(batches)
-                precision += curr_batch_precision / len(batches)
-                recall += curr_batch_recall / len(batches)
-                f1_score += curr_batch_f1 / len(batches)
+        # Calculate metrics
+        accuracy = np.mean(np.array(all_predictions) == np.array(all_targets))
+        precision = precision_score(all_targets, all_predictions, average='weighted', zero_division=0)
+        recall = recall_score(all_targets, all_predictions, average='weighted', zero_division=0)
+        f1 = 2 * (precision * recall) / (precision + recall + 1e-7)
 
-        print("Finished testing on the testing dataset, now printing metrics.")
-        print("Accuracy: {}".format(accuracy))
-        print("Precision: {}".format(precision))
-        print("Recall: {}".format(recall))
-        print("F1 Score: {}".format(f1_score))
-        return accuracy, precision, recall, f1_score
+        # Log test results
+        metrics = {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1
+        }
+        ModelLogger.log_metrics(metrics, 0)
+
+        # Plot confusion matrix and class metrics
+        class_names = [str(i) for i in range(self.data.actions_classes)]
+        ModelVisualizer.plot_confusion_matrix(
+            all_targets,
+            all_predictions,
+            class_names,
+            save_dir='logs',
+            prefix='dqn_'
+        )
+        ModelVisualizer.plot_class_metrics(
+            all_targets,
+            all_predictions,
+            class_names,
+            save_dir='logs',
+            prefix='dqn_'
+        )
+
+        return accuracy, precision, recall, f1
 
     def predict(self, states):
         self.model.eval()

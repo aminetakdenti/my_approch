@@ -6,7 +6,7 @@ import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.utils import compute_class_weight
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
-import matplotlib.pyplot as plt
+from model_utils import ModelVisualizer, ModelLogger
 from datetime import datetime
 import os
 
@@ -75,6 +75,11 @@ class CNNTrainer:
         self.device = device
         self.optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
         self.scheduler = ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=2)
+        self.training_history = {
+            'losses': [],
+            'accuracies': [],
+            'learning_rates': []
+        }
         
     def compute_class_weights(self, labels):
         class_weights = compute_class_weight(
@@ -111,6 +116,11 @@ class CNNTrainer:
         # Calculate accuracy
         predictions = torch.argmax(outputs, dim=1)
         accuracy = (predictions == targets).float().mean().item()
+        
+        # Store metrics
+        self.training_history['losses'].append(loss.item())
+        self.training_history['accuracies'].append(accuracy)
+        self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
         
         return loss.item(), accuracy
     
@@ -166,20 +176,14 @@ class CNNTrainer:
                     early_stopping_patience=5, class_weights=None):
         """
         Run the complete training process
-        
-        Args:
-            train_loader: DataLoader for training data
-            val_loader: Optional DataLoader for validation data
-            epochs: Number of epochs to train
-            save_dir: Directory to save model checkpoints and plots
-            early_stopping_patience: Number of epochs to wait before early stopping
-            class_weights: Optional class weights for imbalanced datasets
         """
         os.makedirs(save_dir, exist_ok=True)
         best_accuracy = 0.0
         patience_counter = 0
-        training_losses = []
-        training_accuracies = []
+        
+        # Log training start
+        ModelLogger.log_training_start(epochs, self.device, "CNN Model")
+        ModelLogger.log_model_summary(self.model)
         
         print(f"Starting training for {epochs} epochs...")
         print(f"Using device: {self.device}")
@@ -194,12 +198,15 @@ class CNNTrainer:
                 loss, accuracy = self.train_step(inputs, targets, class_weights)
                 epoch_losses.append(loss)
                 epoch_accuracies.append(accuracy)
-                training_losses.append(loss)
-                training_accuracies.append(accuracy)
                 
-                if (batch_idx + 1) % 10 == 0:
-                    print(f"Epoch [{epoch+1}/{epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
-                          f"Loss: {loss:.4f} Accuracy: {accuracy:.4f}")
+                # Log batch metrics
+                metrics = {
+                    'epochs': epochs,
+                    'accuracy': accuracy,
+                    'loss': loss,
+                    'learning_rate': self.optimizer.param_groups[0]['lr']
+                }
+                ModelLogger.log_metrics(metrics, epoch, batch_idx, len(train_loader))
             
             # Calculate average metrics for the epoch
             avg_loss = sum(epoch_losses) / len(epoch_losses)
@@ -224,32 +231,40 @@ class CNNTrainer:
                 val_recall = np.mean([m['recall'] for m in val_metrics_list])
                 val_f1 = np.mean([m['f1'] for m in val_metrics_list])
                 
-                print(f"Epoch {epoch+1} - Validation Metrics:")
+                # Log validation metrics
+                val_metrics = {
+                    'accuracy': val_accuracy,
+                    'precision': val_precision,
+                    'recall': val_recall,
+                    'f1_score': val_f1
+                }
+                print(f"\nValidation Metrics (Epoch {epoch + 1}):")
                 print(f"  Accuracy: {val_accuracy:.4f}")
                 print(f"  Precision: {val_precision:.4f}")
                 print(f"  Recall: {val_recall:.4f}")
                 print(f"  F1 Score: {val_f1:.4f}")
+                ModelLogger.log_metrics(val_metrics, epoch, 0, 1)
                 
                 # Plot metrics every few epochs
                 if (epoch + 1) % 2 == 0:
                     # Plot confusion matrix
                     class_names = [str(i) for i in range(len(np.unique(val_targets)))]
-                    confusion_matrix_path = ModelVisualizer.plot_confusion_matrix(
+                    ModelVisualizer.plot_confusion_matrix(
                         val_targets,
                         val_predictions,
                         class_names,
-                        save_dir=os.path.join(save_dir, 'plots')
+                        save_dir=os.path.join(save_dir, 'plots'),
+                        prefix='cnn_'
                     )
-                    print(f"Confusion matrix saved to: {confusion_matrix_path}")
                     
                     # Plot class-wise metrics
-                    metrics_path, class_metrics = ModelVisualizer.plot_class_metrics(
+                    ModelVisualizer.plot_class_metrics(
                         val_targets,
                         val_predictions,
                         class_names,
-                        save_dir=os.path.join(save_dir, 'plots')
+                        save_dir=os.path.join(save_dir, 'plots'),
+                        prefix='cnn_'
                     )
-                    print(f"Class-wise metrics plot saved to: {metrics_path}")
                 
                 # Learning rate scheduling
                 self.scheduler.step(val_accuracy)
@@ -273,152 +288,22 @@ class CNNTrainer:
             
             # Plot training metrics every few epochs
             if (epoch + 1) % 2 == 0:
-                plot_path = ModelVisualizer.plot_training_metrics(
-                    training_losses, 
-                    training_accuracies,
-                    save_dir=os.path.join(save_dir, 'plots')
+                ModelVisualizer.plot_training_metrics(
+                    self.training_history,
+                    save_dir=os.path.join(save_dir, 'plots'),
+                    prefix='cnn_'
                 )
-                print(f"Training plots saved to {plot_path}")
             
             print(f"Epoch {epoch+1} - Avg Loss: {avg_loss:.4f} Avg Accuracy: {avg_accuracy:.4f}")
         
-        return training_losses, training_accuracies, best_accuracy
-
-class ModelVisualizer:
-    @staticmethod
-    def setup_plot_style():
-        plt.style.use('bmh')
-        plt.rcParams['figure.figsize'] = (12, 6)
-        plt.rcParams['font.size'] = 12
-        plt.rcParams['axes.grid'] = True
-        plt.rcParams['grid.alpha'] = 0.3
-        plt.rcParams['axes.titlesize'] = 14
-        plt.rcParams['axes.labelsize'] = 12
-    
-    @staticmethod
-    def plot_training_metrics(losses, accuracies, save_dir='logs'):
-        ModelVisualizer.setup_plot_style()
-        
-        # Create figure with two subplots
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-        
-        # Plot loss with moving average
-        window_size = 50
-        losses_smooth = np.convolve(np.array(losses), np.ones(window_size)/window_size, mode='valid')
-        ax1.plot(losses, label='Training Loss', color='red', alpha=0.3, linewidth=1)
-        ax1.plot(np.arange(window_size-1, len(losses)), losses_smooth, 
-                label='Moving Average', color='red', linewidth=2)
-        ax1.set_title('Training Loss Over Time')
-        ax1.set_xlabel('Batch')
-        ax1.set_ylabel('Loss')
-        ax1.legend()
-        
-        # Plot accuracy with moving average
-        accuracies_smooth = np.convolve(accuracies, np.ones(window_size)/window_size, mode='valid')
-        ax2.plot(accuracies, label='Training Accuracy', color='blue', alpha=0.3, linewidth=1)
-        ax2.plot(np.arange(window_size-1, len(accuracies)), accuracies_smooth,
-                label='Moving Average', color='blue', linewidth=2)
-        ax2.set_title('Training Accuracy Over Time')
-        ax2.set_xlabel('Batch')
-        ax2.set_ylabel('Accuracy')
-        ax2.legend()
-        
-        # Save plot
-        plt.tight_layout()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        save_path = f'{save_dir}/training_metrics_{timestamp}.png'
-        os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        return save_path
-        
-    @staticmethod
-    def plot_confusion_matrix(y_true, y_pred, classes, save_dir='logs'):
-        ModelVisualizer.setup_plot_style()
-        
-        # Compute confusion matrix
-        cm = confusion_matrix(y_true, y_pred)
-        
-        # Create heatmap
-        plt.figure(figsize=(10, 8))
-        plt.imshow(cm, interpolation='nearest', cmap='Blues')
-        plt.title('Confusion Matrix')
-        
-        # Add value annotations
-        thresh = cm.max() / 2
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-                plt.text(j, i, format(cm[i, j], 'd'),
-                        ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black")
-        
-        plt.colorbar()
-        tick_marks = np.arange(len(classes))
-        plt.xticks(tick_marks, classes, rotation=45)
-        plt.yticks(tick_marks, classes)
-        plt.ylabel('True Label')
-        plt.xlabel('Predicted Label')
-        
-        # Save plot
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        save_path = f'{save_dir}/confusion_matrix_{timestamp}.png'
-        os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        return save_path
-
-    @staticmethod
-    def plot_class_metrics(y_true, y_pred, classes, save_dir='logs'):
-        """Plot precision, recall, and F1-score for each class."""
-        ModelVisualizer.setup_plot_style()
-        
-        # Calculate metrics for each class
-        precisions = precision_score(y_true, y_pred, labels=range(len(classes)), average=None, zero_division=0)
-        recalls = recall_score(y_true, y_pred, labels=range(len(classes)), average=None, zero_division=0)
-        f1_scores = f1_score(y_true, y_pred, labels=range(len(classes)), average=None, zero_division=0)
-        
-        # Create bar plot
-        x = np.arange(len(classes))
-        width = 0.25
-        
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.bar(x - width, precisions, width, label='Precision', color='skyblue')
-        ax.bar(x, recalls, width, label='Recall', color='lightgreen')
-        ax.bar(x + width, f1_scores, width, label='F1-score', color='salmon')
-        
-        # Customize plot
-        ax.set_ylabel('Score')
-        ax.set_title('Class-wise Performance Metrics')
-        ax.set_xticks(x)
-        ax.set_xticklabels(classes)
-        ax.legend()
-        plt.grid(True, alpha=0.3)
-        
-        # Add value labels on top of bars
-        def add_value_labels(bars):
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.2f}',
-                        ha='center', va='bottom')
-        
-        for container in ax.containers:
-            add_value_labels(container)
-        
-        # Save plot
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        save_path = f'{save_dir}/class_metrics_{timestamp}.png'
-        os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        return save_path, {
-            'precision': precisions,
-            'recall': recalls,
-            'f1': f1_scores
+        # Log training end
+        final_metrics = {
+            'final_accuracy': best_accuracy,
+            'final_loss': avg_loss
         }
+        ModelLogger.log_training_end(best_accuracy, final_metrics)
+        
+        return self.training_history['losses'], self.training_history['accuracies'], best_accuracy
 
 # Example usage
 if __name__ == "__main__":
@@ -431,7 +316,7 @@ if __name__ == "__main__":
     # Example parameters
     input_channels = 1
     height = width = 28  # MNIST image size
-    output_dim = 310     # MNIST has 10 classes
+    output_dim = 10     # MNIST has 10 classes
     batch_size = 32
     epochs = 10
     
@@ -477,16 +362,16 @@ if __name__ == "__main__":
     final_accuracy = np.mean(np.array(test_predictions) == np.array(test_targets))
     print(f"Final Test Accuracy: {final_accuracy:.4f}")
 
-    # Plot confusion matrix
+    # Plot final confusion matrix and class metrics
     class_names = [str(i) for i in range(10)]  # MNIST has 10 classes (0-9)
-    confusion_matrix_path = ModelVisualizer.plot_confusion_matrix(
-        test_targets, test_predictions, class_names, save_dir='mnist_training/plots'
+    ModelVisualizer.plot_confusion_matrix(
+        test_targets, test_predictions, class_names, 
+        save_dir='mnist_training/plots',
+        prefix='cnn_final_'
     )
-    print(f"Confusion matrix saved to: {confusion_matrix_path}")
-
-    # Plot class metrics
-    class_metrics_path, class_metrics = ModelVisualizer.plot_class_metrics(
-        test_targets, test_predictions, class_names, save_dir='mnist_training/plots'
+    
+    ModelVisualizer.plot_class_metrics(
+        test_targets, test_predictions, class_names, 
+        save_dir='mnist_training/plots',
+        prefix='cnn_final_'
     )
-    print(f"Class metrics plot saved to: {class_metrics_path}")
-    print("Class-wise metrics:", class_metrics)
