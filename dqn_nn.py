@@ -55,8 +55,8 @@ class DataLoader:
         self.numpy_samples = self.df_samples.to_numpy()
 
         self.states_features = self.numpy_samples[
-            :, 1 : self.numpy_samples.shape[1] - 1
-        ]  # Take the feature values for states, also ignore first column for IDs
+            :, 0 : self.numpy_samples.shape[1] - 1
+        ]  # Take the feature values for states
         self.feature_dim = self.states_features.shape[1]
         self.actions_labels = self.numpy_samples[:, -1].reshape(
             -1, 1
