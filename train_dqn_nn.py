@@ -5,17 +5,6 @@ import os
 from dqn_nn import DeepQNet, DataLoader
 
 def run_with_custom_data(csv_filepath):
-    """
-    Example of how to run with your own CSV data
-
-    Your CSV should have the format:
-    ID, feature1, feature2, ..., featureN, action
-
-    Where:
-    - ID: Unique identifier for each sample
-    - feature1, feature2, etc.: State features (numerical values)
-    - action: The optimal action (integer: 0, 1, 2, ...)
-    """
     print(f"Running DQN with custom data: {csv_filepath}")
 
     # Check if file exists
