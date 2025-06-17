@@ -266,7 +266,7 @@ class ModelLogger:
             print("\nFinal metrics:")
             for metric_name, value in final_metrics.items():
                 print(f"{metric_name}: {value:.4f}")
-        print("--------------------------------------------------")
+        print("--------------------------------------------------") 
 
     @staticmethod
     def save_metrics_to_csv(metrics_dict, y_true=None, y_pred=None, classes=None, save_dir='logs', prefix=''):
