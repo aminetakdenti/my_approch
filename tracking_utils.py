@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 from typing import Dict, List, Optional, Union
 import json
+from sklearn.metrics import confusion_matrix
 
 class ModelTracker:
     def __init__(self, model_name: str, base_dir: str = "logs"):
@@ -46,11 +47,26 @@ class ModelTracker:
     
     def setup_plot_style(self):
         """Setup consistent plot style across all visualizations"""
-        plt.style.use('seaborn')
+        plt.style.use('default')  # Use default style instead of seaborn
         plt.rcParams['figure.figsize'] = (12, 6)
         plt.rcParams['font.size'] = 12
         plt.rcParams['axes.grid'] = True
         plt.rcParams['grid.alpha'] = 0.3
+        plt.rcParams['axes.titlesize'] = 14
+        plt.rcParams['axes.labelsize'] = 12
+        plt.rcParams['figure.facecolor'] = 'white'
+        plt.rcParams['axes.facecolor'] = 'white'
+        plt.rcParams['grid.color'] = '#CCCCCC'
+        plt.rcParams['axes.edgecolor'] = '#666666'
+        plt.rcParams['axes.labelcolor'] = '#333333'
+        plt.rcParams['xtick.color'] = '#333333'
+        plt.rcParams['ytick.color'] = '#333333'
+        
+        # Set seaborn style if available
+        try:
+            sns.set_theme(style="whitegrid")
+        except:
+            pass  # Continue without seaborn if not available
     
     def log_metrics(self, metrics: Dict[str, float], epoch: int, phase: str = 'train'):
         """

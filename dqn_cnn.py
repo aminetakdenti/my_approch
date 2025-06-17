@@ -93,8 +93,7 @@ class CNNTrainer:
             mode='max',
             factor=0.5,
             patience=3,
-            min_lr=1e-6,
-            verbose=True
+            min_lr=1e-6
         )
         
         # Initialize tracker
