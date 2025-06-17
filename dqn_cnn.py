@@ -13,6 +13,17 @@ import os
 # Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Hyperparameters
+LEARNING_RATE = 0.001
+EPSILON_START = 1.0
+EPSILON_END = 0.01
+EPSILON_DECAY = 0.995
+LAMBDA = 0.01
+EPOCHS = 50
+BATCH_SIZE = 64
+TRAIN_SPLIT_PERCENT = 0.8
+EARLY_STOPPING_PATIENCE = 5
+
 class CNNModel(nn.Module):
     def __init__(self, input_channels, height, width, output_dim):
         super(CNNModel, self).__init__()
@@ -70,17 +81,29 @@ class CNNModel(nn.Module):
         return x
 
 class CNNTrainer:
-    def __init__(self, model, learning_rate=0.001, device=device):
+    def __init__(self, model, learning_rate=LEARNING_RATE, device=device):
         self.model = model.to(device)
         self.device = device
         self.optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
-        self.scheduler = ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=2)
+        
+        # Initialize learning rate scheduler
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='max',
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6,
+            verbose=True
+        )
+        
         self.training_history = {
             'losses': [],
             'accuracies': [],
-            'learning_rates': []
+            'learning_rates': [],
+            'epsilons': []
         }
-        
+        self.epsilon = EPSILON_START
+    
     def compute_class_weights(self, labels):
         class_weights = compute_class_weight(
             class_weight='balanced',
@@ -88,6 +111,10 @@ class CNNTrainer:
             y=labels
         )
         return torch.FloatTensor(class_weights).to(self.device)
+    
+    def update_epsilon(self):
+        """Update epsilon using exponential decay"""
+        self.epsilon = max(EPSILON_END, self.epsilon * EPSILON_DECAY)
     
     def train_step(self, inputs, targets, class_weights=None):
         self.model.train()
@@ -121,6 +148,7 @@ class CNNTrainer:
         self.training_history['losses'].append(loss.item())
         self.training_history['accuracies'].append(accuracy)
         self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
+        self.training_history['epsilons'].append(self.epsilon)
         
         return loss.item(), accuracy
     
@@ -162,6 +190,7 @@ class CNNTrainer:
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
             'accuracy': accuracy,
         }, path)
     
@@ -170,10 +199,11 @@ class CNNTrainer:
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         return checkpoint['epoch'], checkpoint['accuracy']
 
-    def run_training(self, train_loader, val_loader=None, epochs=10, save_dir='checkpoints', 
-                    early_stopping_patience=5, class_weights=None):
+    def run_training(self, train_loader, val_loader=None, epochs=EPOCHS, save_dir='checkpoints', 
+                    early_stopping_patience=EARLY_STOPPING_PATIENCE, class_weights=None):
         """
         Run the complete training process
         """
@@ -204,13 +234,17 @@ class CNNTrainer:
                     'epochs': epochs,
                     'accuracy': accuracy,
                     'loss': loss,
-                    'learning_rate': self.optimizer.param_groups[0]['lr']
+                    'learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'epsilon': self.epsilon
                 }
                 ModelLogger.log_metrics(metrics, epoch, batch_idx, len(train_loader))
             
             # Calculate average metrics for the epoch
             avg_loss = sum(epoch_losses) / len(epoch_losses)
             avg_accuracy = sum(epoch_accuracies) / len(epoch_accuracies)
+            
+            # Update epsilon
+            self.update_epsilon()
             
             # Validation phase
             if val_loader is not None:
@@ -245,6 +279,9 @@ class CNNTrainer:
                 print(f"  F1 Score: {val_f1:.4f}")
                 ModelLogger.log_metrics(val_metrics, epoch, 0, 1)
                 
+                # Update learning rate based on validation accuracy
+                self.scheduler.step(val_accuracy)
+                
                 # Plot metrics every few epochs
                 if (epoch + 1) % 2 == 0:
                     # Plot confusion matrix
@@ -265,9 +302,6 @@ class CNNTrainer:
                         save_dir=os.path.join(save_dir, 'plots'),
                         prefix='cnn_'
                     )
-                
-                # Learning rate scheduling
-                self.scheduler.step(val_accuracy)
                 
                 # Early stopping check
                 if val_accuracy > best_accuracy:
@@ -295,6 +329,8 @@ class CNNTrainer:
                 )
             
             print(f"Epoch {epoch+1} - Avg Loss: {avg_loss:.4f} Avg Accuracy: {avg_accuracy:.4f}")
+            print(f"Current learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
+            print(f"Current epsilon: {self.epsilon:.4f}")
         
         # Log training end
         final_metrics = {
