@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.utils import compute_class_weight
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 from model_utils import ModelVisualizer, ModelLogger
+from tracking_utils import ModelTracker
 from datetime import datetime
 import os
 
@@ -150,12 +151,8 @@ class DoubleCNNTrainer:
             verbose=True
         )
         
-        self.training_history = {
-            'losses': [],
-            'accuracies': [],
-            'learning_rates': [],
-            'epsilons': []
-        }
+        # Initialize tracker
+        self.tracker = ModelTracker('double_dqn_cnn')
         self.epsilon = EPSILON_START
         
     def compute_class_weights(self, labels):
@@ -209,11 +206,14 @@ class DoubleCNNTrainer:
         predictions = torch.argmax(outputs, dim=1)
         accuracy = (predictions == targets).float().mean().item()
         
-        # Store metrics
-        self.training_history['losses'].append(loss.item())
-        self.training_history['accuracies'].append(accuracy)
-        self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
-        self.training_history['epsilons'].append(self.epsilon)
+        # Log metrics
+        metrics = {
+            'train_loss': loss.item(),
+            'train_accuracy': accuracy,
+            'learning_rate': self.optimizer.param_groups[0]['lr'],
+            'epsilon': self.epsilon
+        }
+        self.tracker.log_metrics(metrics, epoch=0, phase='train')
         
         return loss.item(), accuracy
     
@@ -272,13 +272,20 @@ class DoubleCNNTrainer:
         """
         Run the complete training process
         """
-        os.makedirs(save_dir, exist_ok=True)
         best_accuracy = 0.0
         patience_counter = 0
         
-        # Log training start
-        ModelLogger.log_training_start(epochs, self.device, "Double DQN CNN Model")
-        ModelLogger.log_model_summary(self.model)
+        # Log model summary
+        model_summary = {
+            'model_name': 'double_dqn_cnn',
+            'input_channels': self.model.input_channels,
+            'height': self.model.height,
+            'width': self.model.width,
+            'output_dim': self.model.fc2.out_features,
+            'total_params': sum(p.numel() for p in self.model.parameters()),
+            'trainable_params': sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        }
+        self.tracker.save_summary(model_summary)
         
         print(f"Starting training for {epochs} epochs...")
         print(f"Using device: {self.device}")
@@ -293,16 +300,6 @@ class DoubleCNNTrainer:
                 loss, accuracy = self.train_step(inputs, targets, class_weights)
                 epoch_losses.append(loss)
                 epoch_accuracies.append(accuracy)
-                
-                # Log batch metrics
-                metrics = {
-                    'epochs': epochs,
-                    'accuracy': accuracy,
-                    'loss': loss,
-                    'learning_rate': self.optimizer.param_groups[0]['lr'],
-                    'epsilon': self.epsilon
-                }
-                ModelLogger.log_metrics(metrics, epoch, batch_idx, len(train_loader))
             
             # Calculate average metrics for the epoch
             avg_loss = sum(epoch_losses) / len(epoch_losses)
@@ -332,40 +329,25 @@ class DoubleCNNTrainer:
                 
                 # Log validation metrics
                 val_metrics = {
-                    'accuracy': val_accuracy,
-                    'precision': val_precision,
-                    'recall': val_recall,
-                    'f1_score': val_f1
+                    'val_loss': avg_loss,  # Using training loss as approximation
+                    'val_accuracy': val_accuracy,
+                    'val_precision': val_precision,
+                    'val_recall': val_recall,
+                    'val_f1': val_f1
                 }
-                print(f"\nValidation Metrics (Epoch {epoch + 1}):")
-                print(f"  Accuracy: {val_accuracy:.4f}")
-                print(f"  Precision: {val_precision:.4f}")
-                print(f"  Recall: {val_recall:.4f}")
-                print(f"  F1 Score: {val_f1:.4f}")
-                ModelLogger.log_metrics(val_metrics, epoch, 0, 1)
+                self.tracker.log_metrics(val_metrics, epoch=epoch, phase='val')
                 
                 # Update learning rate based on validation accuracy
                 self.scheduler.step(val_accuracy)
                 
                 # Plot metrics every few epochs
                 if (epoch + 1) % 2 == 0:
-                    # Plot confusion matrix
-                    class_names = [str(i) for i in range(len(np.unique(val_targets)))]
-                    ModelVisualizer.plot_confusion_matrix(
+                    self.tracker.plot_training_curves()
+                    self.tracker.plot_learning_rate_and_epsilon()
+                    self.tracker.plot_confusion_matrix(
                         val_targets,
                         val_predictions,
-                        class_names,
-                        save_dir=os.path.join(save_dir, 'plots'),
-                        prefix='double_dqn_cnn_'
-                    )
-                    
-                    # Plot class-wise metrics
-                    ModelVisualizer.plot_class_metrics(
-                        val_targets,
-                        val_predictions,
-                        class_names,
-                        save_dir=os.path.join(save_dir, 'plots'),
-                        prefix='double_dqn_cnn_'
+                        class_names=[str(i) for i in range(len(np.unique(val_targets)))]
                     )
                 
                 # Early stopping check
@@ -385,23 +367,8 @@ class DoubleCNNTrainer:
                     print(f"Early stopping triggered after {epoch + 1} epochs")
                     break
             
-            # Plot training metrics every few epochs
-            if (epoch + 1) % 2 == 0:
-                ModelVisualizer.plot_training_metrics(
-                    self.training_history,
-                    save_dir=os.path.join(save_dir, 'plots'),
-                    prefix='double_dqn_cnn_'
-                )
-            
             print(f"Epoch {epoch+1} - Avg Loss: {avg_loss:.4f} Avg Accuracy: {avg_accuracy:.4f}")
             print(f"Current learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             print(f"Current epsilon: {self.epsilon:.4f}")
         
-        # Log training end
-        final_metrics = {
-            'final_accuracy': best_accuracy,
-            'final_loss': avg_loss
-        }
-        ModelLogger.log_training_end(best_accuracy, final_metrics)
-        
-        return self.training_history['losses'], self.training_history['accuracies'], best_accuracy 
+        return self.tracker.metrics_history['train_loss'], self.tracker.metrics_history['train_accuracy'], best_accuracy 

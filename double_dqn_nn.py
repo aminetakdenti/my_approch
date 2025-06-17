@@ -7,6 +7,7 @@ import pandas as pd
 import random
 from sklearn.metrics import precision_score, recall_score
 from model_utils import ModelVisualizer, ModelLogger
+from tracking_utils import ModelTracker
 from typing import List, Tuple, Dict, Optional, Union
 from datetime import datetime
 import os
@@ -56,32 +57,29 @@ class DoubleDeepQNet:
         self.input_dim = dataset.feature_dim
         self.output_dim = dataset.actions_classes
         self.epsilon = EPSILON_START
-        self.training_history = {
-            'losses': [],
-            'accuracies': [],
-            'epsilons': [],
-            'learning_rates': []
-        }
-
-        # Create both online and target networks
-        self.q_network = self.create_model()
-        self.target_network = self.create_model()
-        self.update_target_network()  # Initialize target network with online network weights
         
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=LEARNING_RATE)
+        # Initialize tracker
+        self.tracker = ModelTracker('double_dqn_nn')
         
-        # Fixed scheduler configuration
+        print("here shape: ", self.input_dim, self.output_dim)
+        self.model = self.create_model()  # Main DQN model
+        self.target_model = self.create_model()  # Target DQN model
+        self.target_model.load_state_dict(self.model.state_dict())
+        
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
+        
+        # Initialize learning rate scheduler
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='max',
             factor=0.5,
             patience=3,
-            min_lr=1e-6
+            min_lr=1e-6,
+            verbose=True
         )
         
         self.criterion = nn.CrossEntropyLoss()
         self.target_update_counter = 0
-        self.target_update_frequency = 5  # Update target network every 5 epochs
 
     def create_model(self) -> DoubleDQNModel:
         """
@@ -97,7 +95,7 @@ class DoubleDeepQNet:
         Update target network weights with online network weights.
         This is called periodically during training to maintain a stable target.
         """
-        self.target_network.load_state_dict(self.q_network.state_dict())
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def load_model(self, path: str) -> None:
         """
@@ -106,7 +104,7 @@ class DoubleDeepQNet:
         Args:
             path (str): Path to the saved model weights
         """
-        self.q_network.load_state_dict(torch.load(path, map_location=device))
+        self.model.load_state_dict(torch.load(path, map_location=device))
         self.update_target_network()
 
     def save_model(self, path: str) -> None:
@@ -116,16 +114,16 @@ class DoubleDeepQNet:
         Args:
             path (str): Path where to save the model weights
         """
-        torch.save(self.q_network.state_dict(), path)
+        torch.save(self.model.state_dict(), path)
 
     def summary(self) -> None:
         """
         Print a summary of the model architecture and parameters.
         """
         print("Online Network:")
-        print(self.q_network)
-        total_params = sum(p.numel() for p in self.q_network.parameters())
-        trainable_params = sum(p.numel() for p in self.q_network.parameters() if p.requires_grad)
+        print(self.model)
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print(f"Total parameters: {total_params}")
         print(f"Trainable parameters: {trainable_params}")
 
@@ -202,102 +200,108 @@ class DoubleDeepQNet:
             Tuple[List[float], List[float]]: Lists of losses and accuracies during training
         """
         try:
-            losses = []
-            accuracies = []
             best_accuracy = 0
             patience_counter = 0
             batches = self.data.train_batches
-
-            # Log training start
-            ModelLogger.log_training_start(EPOCHS, device, "Double DQN Model")
-            ModelLogger.log_model_summary(self.q_network)
-
-            self.q_network.train()
-            self.target_network.eval()  # Target network is always in eval mode
-
+            
+            # Log model summary
+            model_summary = {
+                'model_name': 'double_dqn_nn',
+                'input_dim': self.input_dim,
+                'output_dim': self.output_dim,
+                'total_params': sum(p.numel() for p in self.model.parameters()),
+                'trainable_params': sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            }
+            self.tracker.save_summary(model_summary)
+            
+            print(f"Starting training for {EPOCHS} epochs...")
+            print(f"Using device: {device}")
+            
+            self.model.train()
+            self.target_model.train()
+            
             for epoch in range(EPOCHS):
                 epoch_losses = []
                 epoch_accuracies = []
-
+                
                 for batch_idx, batch in enumerate(batches):
                     current_states, optimal_actions, next_states = self.process_batch(batch)
-
+                    
                     current_states_tensor = torch.FloatTensor(current_states).to(device)
                     next_states_tensor = torch.FloatTensor(next_states).to(device)
                     optimal_actions_tensor = torch.LongTensor(optimal_actions).to(device)
-
-                    # Get Q-values from online network
-                    estimated_qs_vec_t = self.q_network(current_states_tensor)
+                    
+                    # Get Q-values from main network
+                    estimated_qs_vec_t = self.model(current_states_tensor)
                     estimated_qs_vec_t_np = estimated_qs_vec_t.detach().cpu().numpy()
                     predicted_actions_t = self.greedy(estimated_qs_vec_t_np, epsilon=self.epsilon)
                     rewards_t = self.get_reward(predicted_actions_t, optimal_actions)
-
+                    
                     with torch.no_grad():
-                        # Double DQN specific logic:
-                        # 1. Use online network to select actions
-                        next_q_values_online = self.q_network(next_states_tensor)
-                        next_actions = torch.argmax(next_q_values_online, dim=1)
-                        
-                        # 2. Use target network to evaluate the selected actions
-                        next_q_values_target = self.target_network(next_states_tensor)
-                        q_cap_t_plus_one = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
-                        q_cap_t_plus_one = q_cap_t_plus_one.cpu().numpy()
-
-                    # Compute target Q-values
+                        # Get Q-values from target network
+                        estimated_qs_vec_t_plus_one = self.target_model(next_states_tensor)
+                        estimated_qs_vec_t_plus_one_np = estimated_qs_vec_t_plus_one.cpu().numpy()
+                        predicted_actions_t_plus_one = self.greedy(estimated_qs_vec_t_plus_one_np, epsilon=1.0)
+                        all_rows_idx = np.arange(estimated_qs_vec_t_plus_one_np.shape[0])
+                        q_cap_t_plus_one = estimated_qs_vec_t_plus_one_np[all_rows_idx, predicted_actions_t_plus_one]
+                    
                     qref = np.zeros_like(estimated_qs_vec_t_np)
-                    all_rows_idx = np.arange(estimated_qs_vec_t_np.shape[0])
                     qref[all_rows_idx, optimal_actions] = 1
                     qref[all_rows_idx, predicted_actions_t] += LAMBDA * q_cap_t_plus_one
                     qref_softmax = np.zeros_like(qref)
                     qref_softmax[all_rows_idx, qref.argmax(1)] = 1
-
+                    
                     qref_softmax_tensor = torch.FloatTensor(qref_softmax).to(device)
-
-                    # Update online network
+                    
                     self.optimizer.zero_grad()
                     loss = self.criterion(estimated_qs_vec_t, qref_softmax_tensor)
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     self.optimizer.step()
-
+                    
                     with torch.no_grad():
                         predictions = torch.argmax(estimated_qs_vec_t, dim=1)
                         targets = torch.argmax(qref_softmax_tensor, dim=1)
                         accuracy = (predictions == targets).float().mean().item()
-
+                    
                     epoch_losses.append(loss.item())
                     epoch_accuracies.append(accuracy)
-
-                    # Store metrics for plotting
-                    self.training_history['losses'].append(loss.item())
-                    self.training_history['accuracies'].append(accuracy)
-                    self.training_history['epsilons'].append(self.epsilon)
-                    self.training_history['learning_rates'].append(self.optimizer.param_groups[0]['lr'])
-
-                    # Log batch metrics
+                    
+                    # Log metrics
                     metrics = {
-                        'epochs': EPOCHS,
-                        'accuracy': accuracy,
-                        'loss': loss.item(),
-                        'epsilon': self.epsilon,
-                        'learning_rate': self.optimizer.param_groups[0]['lr']
+                        'train_loss': loss.item(),
+                        'train_accuracy': accuracy,
+                        'learning_rate': self.optimizer.param_groups[0]['lr'],
+                        'epsilon': self.epsilon
                     }
-                    ModelLogger.log_metrics(metrics, epoch, batch_idx, len(batches))
-
+                    self.tracker.log_metrics(metrics, epoch=epoch, phase='train')
+                    
+                    # Update target network
+                    self.target_update_counter += 1
+                    if self.target_update_counter % TARGET_UPDATE_FREQ == 0:
+                        self.update_target_network()
+                
                 # Update epsilon after each epoch
                 self.update_epsilon()
-
-                # Update target network periodically
-                self.target_update_counter += 1
-                if self.target_update_counter % self.target_update_frequency == 0:
-                    self.update_target_network()
-
+                
                 # Calculate epoch metrics
                 avg_epoch_accuracy = np.mean(epoch_accuracies)
                 avg_epoch_loss = np.mean(epoch_losses)
                 
                 # Update learning rate based on accuracy
                 self.scheduler.step(avg_epoch_accuracy)
+                
+                # Log validation metrics
+                val_metrics = {
+                    'val_loss': avg_epoch_loss,
+                    'val_accuracy': avg_epoch_accuracy
+                }
+                self.tracker.log_metrics(val_metrics, epoch=epoch, phase='val')
+                
+                # Plot metrics every few epochs
+                if (epoch + 1) % 2 == 0:
+                    self.tracker.plot_training_curves()
+                    self.tracker.plot_learning_rate_and_epsilon()
                 
                 # Early stopping check
                 if avg_epoch_accuracy > best_accuracy:
@@ -310,26 +314,12 @@ class DoubleDeepQNet:
                     if patience_counter >= EARLY_STOPPING_PATIENCE:
                         print(f"Early stopping triggered after {epoch + 1} epochs")
                         break
-
-                losses.extend(epoch_losses)
-                accuracies.extend(epoch_accuracies)
-
-                # Plot training metrics every few epochs
-                if (epoch + 1) % 2 == 0:
-                    ModelVisualizer.plot_training_metrics(
-                        self.training_history,
-                        save_dir=plot_dir,
-                        prefix='double_dqn_'
-                    )
-
-            # Log training end
-            final_metrics = {
-                'final_accuracy': best_accuracy,
-                'final_loss': np.mean(losses[-len(batches):])
-            }
-            ModelLogger.log_training_end(best_accuracy, final_metrics)
-
-            return losses, accuracies
+                
+                print(f"Epoch {epoch+1} - Avg Loss: {avg_epoch_loss:.4f} Avg Accuracy: {avg_epoch_accuracy:.4f}")
+                print(f"Current learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
+                print(f"Current epsilon: {self.epsilon:.4f}")
+            
+            return self.tracker.metrics_history['train_loss'], self.tracker.metrics_history['train_accuracy']
             
         except Exception as e:
             print(f"An error occurred during training: {str(e)}")
@@ -345,53 +335,44 @@ class DoubleDeepQNet:
         batches = self.data.test_batches
         all_predictions = []
         all_targets = []
-
-        self.q_network.eval()
-
+        
+        self.model.eval()
+        self.target_model.eval()
+        
         with torch.no_grad():
             for batch_idx, batch in enumerate(batches):
                 current_states, optimal_actions, _ = self.process_batch(batch)
                 current_states_tensor = torch.FloatTensor(current_states).to(device)
-
-                estimated_qs_vec = self.q_network(current_states_tensor)
+                
+                estimated_qs_vec = self.model(current_states_tensor)
                 estimated_qs_vec_np = estimated_qs_vec.cpu().numpy()
                 predicted_actions = self.greedy(estimated_qs_vec_np, epsilon=1.0).squeeze()
-
+                
                 all_predictions.extend(predicted_actions)
                 all_targets.extend(optimal_actions)
-
+        
         # Calculate metrics
         accuracy = np.mean(np.array(all_predictions) == np.array(all_targets))
         precision = precision_score(all_targets, all_predictions, average='weighted', zero_division=0)
         recall = recall_score(all_targets, all_predictions, average='weighted', zero_division=0)
         f1 = 2 * (precision * recall) / (precision + recall + 1e-7)
-
-        # Log test results
-        metrics = {
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall,
-            'f1_score': f1
+        
+        # Log test metrics
+        test_metrics = {
+            'test_accuracy': accuracy,
+            'test_precision': precision,
+            'test_recall': recall,
+            'test_f1': f1
         }
-        ModelLogger.log_metrics(metrics, 0)
-
-        # Plot confusion matrix and class metrics
-        class_names = [str(i) for i in range(self.data.actions_classes)]
-        ModelVisualizer.plot_confusion_matrix(
+        self.tracker.log_metrics(test_metrics, epoch=0, phase='test')
+        
+        # Plot confusion matrix
+        self.tracker.plot_confusion_matrix(
             all_targets,
             all_predictions,
-            class_names,
-            save_dir='logs',
-            prefix='double_dqn_'
+            class_names=[str(i) for i in range(self.data.actions_classes)]
         )
-        ModelVisualizer.plot_class_metrics(
-            all_targets,
-            all_predictions,
-            class_names,
-            save_dir='logs',
-            prefix='double_dqn_'
-        )
-
+        
         return accuracy, precision, recall, f1
 
     def predict(self, states: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
@@ -404,14 +385,14 @@ class DoubleDeepQNet:
         Returns:
             np.ndarray: Predicted actions
         """
-        self.q_network.eval()
+        self.model.eval()
         with torch.no_grad():
             if isinstance(states, np.ndarray):
                 states_tensor = torch.FloatTensor(states).to(device)
             else:
                 states_tensor = states.to(device)
 
-            estimated_qs = self.q_network(states_tensor)
+            estimated_qs = self.model(states_tensor)
             estimated_qs_np = estimated_qs.cpu().numpy()
             predicted_action = self.greedy(estimated_qs_np, epsilon=1.0).squeeze()
         return predicted_action
