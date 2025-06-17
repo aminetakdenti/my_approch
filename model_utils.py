@@ -2,8 +2,66 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import os
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, accuracy_score
 import torch
+import pandas as pd
+from functools import wraps
+
+def csv_logger(save_dir='logs', prefix=''):
+    """
+    Decorator to automatically save metrics to CSV while preserving original method functionality
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Call the original function
+            result = func(*args, **kwargs)
+            
+            # Extract metrics based on the function name
+            metrics = {}
+            if func.__name__ == 'log_model_summary':
+                model = args[0]
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                metrics = {
+                    'total_parameters': total_params,
+                    'trainable_parameters': trainable_params,
+                    'model_architecture': str(model)
+                }
+                prefix_suffix = 'model_summary_'
+                
+            elif func.__name__ == 'log_training_start':
+                epochs, device, model_name = args[0], args[1], args[2] if len(args) > 2 else ""
+                metrics = {
+                    'model_name': model_name,
+                    'epochs': epochs,
+                    'device': str(device),
+                    'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                prefix_suffix = 'training_start_'
+                
+            elif func.__name__ == 'log_training_end':
+                best_accuracy = args[0]
+                final_metrics = args[1] if len(args) > 1 else None
+                metrics = {
+                    'best_accuracy': best_accuracy,
+                    'end_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                if final_metrics:
+                    metrics.update(final_metrics)
+                prefix_suffix = 'training_end_'
+            
+            # Save metrics to CSV
+            if metrics:
+                ModelLogger.save_metrics_to_csv(
+                    metrics,
+                    save_dir=save_dir,
+                    prefix=f'{prefix}{prefix_suffix}'
+                )
+            
+            return result
+        return wrapper
+    return decorator
 
 class ModelVisualizer:
     @staticmethod
@@ -178,6 +236,7 @@ class ModelLogger:
         print("--------------------------------------------------")
 
     @staticmethod
+    @csv_logger()
     def log_model_summary(model):
         """Log model architecture and parameters"""
         print("\nModel Summary:")
@@ -189,6 +248,7 @@ class ModelLogger:
         print("--------------------------------------------------")
 
     @staticmethod
+    @csv_logger()
     def log_training_start(epochs, device, model_name=""):
         """Log training start information"""
         print(f"\nStarting training for {model_name}")
@@ -197,6 +257,7 @@ class ModelLogger:
         print("--------------------------------------------------")
 
     @staticmethod
+    @csv_logger()
     def log_training_end(best_accuracy, final_metrics=None):
         """Log training end information"""
         print("\nTraining completed!")
@@ -205,4 +266,62 @@ class ModelLogger:
             print("\nFinal metrics:")
             for metric_name, value in final_metrics.items():
                 print(f"{metric_name}: {value:.4f}")
-        print("--------------------------------------------------") 
+        print("--------------------------------------------------")
+
+    @staticmethod
+    def save_metrics_to_csv(metrics_dict, y_true=None, y_pred=None, classes=None, save_dir='logs', prefix=''):
+        """
+        Save various metrics to a CSV file including confusion matrix, F1, recall, accuracy etc.
+        
+        Args:
+            metrics_dict (dict): Dictionary containing training metrics
+            y_true (array-like): True labels
+            y_pred (array-like): Predicted labels
+            classes (list): List of class names
+            save_dir (str): Directory to save the CSV file
+            prefix (str): Prefix for the saved file
+        """
+        os.makedirs(save_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Create a dictionary to store all metrics
+        all_metrics = {}
+        
+        # Add basic metrics
+        all_metrics.update(metrics_dict)
+        
+        # Add classification metrics if y_true and y_pred are provided
+        if y_true is not None and y_pred is not None:
+            all_metrics['accuracy'] = accuracy_score(y_true, y_pred)
+            all_metrics['macro_f1'] = f1_score(y_true, y_pred, average='macro', zero_division=0)
+            all_metrics['macro_precision'] = precision_score(y_true, y_pred, average='macro', zero_division=0)
+            all_metrics['macro_recall'] = recall_score(y_true, y_pred, average='macro', zero_division=0)
+            
+            # Add per-class metrics if classes are provided
+            if classes is not None:
+                for i, class_name in enumerate(classes):
+                    class_f1 = f1_score(y_true, y_pred, labels=[i], average='micro', zero_division=0)
+                    class_precision = precision_score(y_true, y_pred, labels=[i], average='micro', zero_division=0)
+                    class_recall = recall_score(y_true, y_pred, labels=[i], average='micro', zero_division=0)
+                    
+                    all_metrics[f'{class_name}_f1'] = class_f1
+                    all_metrics[f'{class_name}_precision'] = class_precision
+                    all_metrics[f'{class_name}_recall'] = class_recall
+            
+            # Add confusion matrix
+            cm = confusion_matrix(y_true, y_pred)
+            if classes is not None:
+                for i, true_class in enumerate(classes):
+                    for j, pred_class in enumerate(classes):
+                        all_metrics[f'confusion_{true_class}_vs_{pred_class}'] = cm[i, j]
+            else:
+                for i in range(cm.shape[0]):
+                    for j in range(cm.shape[1]):
+                        all_metrics[f'confusion_{i}_vs_{j}'] = cm[i, j]
+        
+        # Convert to DataFrame and save
+        df = pd.DataFrame([all_metrics])
+        save_path = os.path.join(save_dir, f'{prefix}metrics_{timestamp}.csv')
+        df.to_csv(save_path, index=False)
+        
+        return save_path 
