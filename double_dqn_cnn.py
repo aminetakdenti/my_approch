@@ -19,11 +19,12 @@ LEARNING_RATE = 0.001
 EPSILON_START = 1.0
 EPSILON_END = 0.01
 EPSILON_DECAY = 0.995
-LAMBDA = 0.01
-EPOCHS = 50
+LAMBDA = 0.9
+EPOCHS = 100
 BATCH_SIZE = 64
 TRAIN_SPLIT_PERCENT = 0.8
 EARLY_STOPPING_PATIENCE = 5
+TARGET_UPDATE_FREQ = 5  # Update target network every 5 epochs
 
 class DoubleCNNModel(nn.Module):
     def __init__(self, input_channels, height, width, output_dim):

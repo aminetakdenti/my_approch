@@ -1,4 +1,4 @@
-.PHONY: clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs train-double-dqn train-double-dqn-advanced train-double-dqn-cnn train-double-dqn-cnn-advanced train-all-and-compare train-all-and-compare-advanced
+.PHONY: clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs train-double-dqn train-double-dqn-advanced train-double-dqn-cnn train-double-dqn-cnn-advanced train-all-and-compare train-all-and-compare-advanced compare
 
 
 # Installation
@@ -99,6 +99,17 @@ train-all-and-compare: install
 	@echo "Generating comparison graphs..."
 	@python compare_all_models.py
 	@echo "All models trained and comparison generated!"
+
+# Compare existing models or train if data is missing
+compare: install
+	@echo "Checking for existing model data in logs directory..."
+	@if [ -d "logs/dqn_nn_logs" ] && [ -d "logs/double_dqn_nn_logs" ] && [ -d "logs/dqn_cnn_logs" ] && [ -d "logs/double_dqn_cnn_logs" ]; then \
+		echo "All model data found. Generating comparison..." ; \
+		python compare_all_models.py ; \
+	else \
+		echo "Some model data is missing. Running full training..." ; \
+		$(MAKE) train-all-and-compare ; \
+	fi
 
 # Train all models with advanced parameters and generate comparison
 train-all-and-compare-advanced: install

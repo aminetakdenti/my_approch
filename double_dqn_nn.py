@@ -13,6 +13,9 @@ from datetime import datetime
 import os
 from dqn_nn import DQNModel, DataLoader, device, LEARNING_RATE, EPSILON_START, EPSILON_END, EPSILON_DECAY, LAMBDA, EPOCHS, BATCH_SIZE, TRAIN_SPLIT_PERCENT, EARLY_STOPPING_PATIENCE
 
+# Hyperparameters
+TARGET_UPDATE_FREQ = 5  # Update target network every 5 epochs
+
 class DoubleDQNModel(DQNModel):
     """
     Double DQN model that inherits from the base DQN model.

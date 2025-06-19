@@ -197,88 +197,108 @@ class ModelTracker:
             json.dump(summary_dict, f, indent=4)
 
 class ModelComparison:
-    def __init__(self, base_dir: str = "logs"):
-        """
-        Initialize model comparison tool.
-        
-        Args:
-            base_dir (str): Base directory containing model logs
-        """
-        self.base_dir = base_dir
+    def __init__(self):
+        self.metrics_data = {}
+        self.setup_plot_style()
     
     def load_metrics(self, model_name: str) -> pd.DataFrame:
-        """
-        Load metrics for a specific model.
+        """Load metrics from a model's log directory"""
+        metrics_dir = f'logs/{model_name}_logs/metrics'
+        if not os.path.exists(metrics_dir):
+            print(f"Warning: No metrics directory found for {model_name}")
+            return pd.DataFrame()
         
-        Args:
-            model_name (str): Name of the model
-            
-        Returns:
-            pd.DataFrame: DataFrame containing model metrics
-        """
-        metrics_dir = os.path.join(self.base_dir, f"{model_name}_logs", "metrics")
-        metrics_files = [f for f in os.listdir(metrics_dir) if f.endswith('.csv')]
+        # Get all CSV files in the metrics directory
+        csv_files = [f for f in os.listdir(metrics_dir) if f.endswith('.csv')]
+        if not csv_files:
+            print(f"Warning: No CSV files found in {metrics_dir}")
+            return pd.DataFrame()
         
-        if not metrics_files:
-            raise FileNotFoundError(f"No metrics files found for model {model_name}")
+        # Get the latest file
+        latest_file = max(csv_files, key=lambda x: os.path.getctime(os.path.join(metrics_dir, x)))
         
-        # Load the most recent metrics file
-        latest_file = max(metrics_files, key=lambda x: os.path.getctime(os.path.join(metrics_dir, x)))
-        return pd.read_csv(os.path.join(metrics_dir, latest_file))
+        try:
+            # Read CSV with error handling
+            df = pd.read_csv(os.path.join(metrics_dir, latest_file), on_bad_lines='skip')
+            self.metrics_data[model_name] = df
+            return df
+        except Exception as e:
+            print(f"Warning: Error loading metrics for {model_name}: {str(e)}")
+            return pd.DataFrame()
     
-    def compare_models(self, model_names: List[str], metric: str = 'val_accuracy', 
-                      save: bool = True, save_dir: str = "comparison_plots"):
-        """
-        Compare multiple models based on a specific metric.
-        
-        Args:
-            model_names (List[str]): List of model names to compare
-            metric (str): Metric to compare
-            save (bool): Whether to save the plot
-            save_dir (str): Directory to save comparison plots
-        """
+    def compare_models(self, metric: str, save_dir: str = 'comparison_results'):
+        """Compare a specific metric across all models"""
         plt.figure(figsize=(12, 6))
         
-        for model_name in model_names:
-            df = self.load_metrics(model_name)
-            plt.plot(df['epoch'], df[metric], label=model_name)
+        for model_name, df in self.metrics_data.items():
+            if metric in df.columns:
+                # Get the training phase data
+                train_data = df[df['phase'] == 'train'][metric] if 'phase' in df.columns else df[metric]
+                if not train_data.empty:
+                    plt.plot(train_data, label=f'{model_name} (Train)')
+                
+                # Get the validation phase data if available
+                if 'phase' in df.columns:
+                    val_data = df[df['phase'] == 'val'][metric]
+                    if not val_data.empty:
+                        plt.plot(val_data, label=f'{model_name} (Val)')
         
-        plt.title(f'Comparison of {metric} across models')
+        plt.title(f'{metric.replace("_", " ").title()} Comparison')
         plt.xlabel('Epoch')
-        plt.ylabel(metric)
+        plt.ylabel(metric.replace('_', ' ').title())
         plt.legend()
-        plt.grid(True)
+        plt.grid(True, alpha=0.3)
         
-        if save:
-            os.makedirs(save_dir, exist_ok=True)
-            save_path = os.path.join(save_dir, f"comparison_{metric}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            plt.close()
-        else:
-            plt.show()
+        # Save plot
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f'{metric}_comparison.png')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return save_path
     
-    def create_summary_table(self, model_names: List[str], metrics: List[str]) -> pd.DataFrame:
-        """
-        Create a summary table comparing multiple models across different metrics.
-        
-        Args:
-            model_names (List[str]): List of model names to compare
-            metrics (List[str]): List of metrics to compare
-            
-        Returns:
-            pd.DataFrame: Summary table
-        """
+    def create_summary_table(self) -> pd.DataFrame:
+        """Create a summary table of final metrics for all models"""
         summary_data = []
         
-        for model_name in model_names:
-            df = self.load_metrics(model_name)
+        for model_name, df in self.metrics_data.items():
+            if df.empty:
+                continue
+                
             model_summary = {'model': model_name}
             
-            for metric in metrics:
-                model_summary[f'{metric}_mean'] = df[metric].mean()
-                model_summary[f'{metric}_max'] = df[metric].max()
-                model_summary[f'{metric}_min'] = df[metric].min()
+            # Get the latest metrics for each phase
+            for phase in ['train', 'val', 'test']:
+                phase_data = df[df['phase'] == phase] if 'phase' in df.columns else df
+                if not phase_data.empty:
+                    for col in df.columns:
+                        if col not in ['phase', 'epoch', 'model']:
+                            # Get the last value for this metric
+                            last_value = phase_data[col].iloc[-1]
+                            model_summary[f'{phase}_{col}'] = last_value
             
             summary_data.append(model_summary)
         
-        return pd.DataFrame(summary_data) 
+        return pd.DataFrame(summary_data)
+    
+    def setup_plot_style(self):
+        """Setup consistent plot style for comparisons"""
+        plt.style.use('default')
+        plt.rcParams['figure.figsize'] = (12, 6)
+        plt.rcParams['font.size'] = 12
+        plt.rcParams['axes.grid'] = True
+        plt.rcParams['grid.alpha'] = 0.3
+        plt.rcParams['axes.titlesize'] = 14
+        plt.rcParams['axes.labelsize'] = 12
+        plt.rcParams['figure.facecolor'] = 'white'
+        plt.rcParams['axes.facecolor'] = 'white'
+        plt.rcParams['grid.color'] = '#CCCCCC'
+        plt.rcParams['axes.edgecolor'] = '#666666'
+        plt.rcParams['axes.labelcolor'] = '#333333'
+        plt.rcParams['xtick.color'] = '#333333'
+        plt.rcParams['ytick.color'] = '#333333'
+        
+        try:
+            sns.set_theme(style="whitegrid")
+        except:
+            pass 
