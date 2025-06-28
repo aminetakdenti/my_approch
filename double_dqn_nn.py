@@ -374,6 +374,29 @@ class DoubleDeepQNet:
             all_predictions,
             class_names=[str(i) for i in range(self.data.actions_classes)]
         )
+
+        # Save extended summary with hyperparameters and final metrics
+        summary = {
+            'model_name': 'double_dqn_nn',
+            'input_dim': self.input_dim,
+            'output_dim': self.output_dim,
+            'total_params': sum(p.numel() for p in self.model.parameters()),
+            'trainable_params': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+            'LEARNING_RATE': LEARNING_RATE,
+            'EPSILON_START': EPSILON_START,
+            'EPSILON_END': EPSILON_END,
+            'EPSILON_DECAY': EPSILON_DECAY,
+            'LAMBDA': LAMBDA,
+            'EPOCHS': EPOCHS,
+            'BATCH_SIZE': BATCH_SIZE,
+            'TRAIN_SPLIT_PERCENT': TRAIN_SPLIT_PERCENT,
+            'EARLY_STOPPING_PATIENCE': EARLY_STOPPING_PATIENCE,
+            'test_accuracy': accuracy,
+            'test_precision': precision,
+            'test_recall': recall,
+            'test_f1': f1
+        }
+        self.tracker.save_summary(summary)
         
         return accuracy, precision, recall, f1
 

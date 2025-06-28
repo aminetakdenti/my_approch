@@ -1,4 +1,4 @@
-.PHONY: clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs train-double-dqn train-double-dqn-advanced train-double-dqn-cnn train-double-dqn-cnn-advanced train-all-and-compare train-all-and-compare-advanced compare
+.PHONY: clean run run-test run-cnn-test run-cnn-models train-cnn install test lint docs train-double-dqn train-double-dqn-advanced train-double-dqn-cnn train-double-dqn-cnn-advanced train-all-and-compare train-all-and-compare-advanced compare compare-plots
 
 
 # Installation
@@ -45,6 +45,10 @@ train-double-dqn-advanced:
 	read -p "Enter model name [double_dqn]: " model_name; \
 	model_name=$${model_name:-double_dqn}; \
 	DATA_PATH=$$data_path BATCH_SIZE=$$batch_size EPOCHS=$$epochs LEARNING_RATE=$$lr MODEL_NAME=$$model_name python train_double_dqn.py
+
+# Running models
+run-comparison:
+	python generate_comparison_plots.py
 
 # Running models
 run-cnn:
@@ -165,3 +169,7 @@ train-all-and-compare-advanced: install
 	@echo "Generating comparison graphs..."
 	@python compare_all_models.py
 	@echo "All models trained with advanced parameters and comparison generated!"
+
+compare-plots:
+	pip install -r requirements.txt
+	python generate_comparison_plots.py

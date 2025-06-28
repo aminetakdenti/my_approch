@@ -1,0 +1,170 @@
+Google Slides Text Content for Thesis Presentation with Detailed Speech Notes (Final Enhanced Version)
+
+Slide 1: Title Slide
+Title: Deep Q-Learning Based Approach for DoS Attacks Detection
+Presented by: Haitham Attab, Amine Takdenti
+Supervisor: Prof. Brahim Sahmadi
+Institution: Yahia Fares University of Medea
+🗣️ Speech Note: "Good [morning/afternoon] everyone. Thank you for being here today. My name is Amine Takdenti, and I’m joined by my colleague Haitham Attab. Together, we are presenting our final year thesis titled: 'Deep Q-Learning Based Approach for DoS Attacks Detection.' This research was supervised by Professor Brahim Sahmadi at Yahia Fares University of Medea."
+
+Slide 2: Agenda
+Introduction
+Problem Statement & Motivation
+Objectives
+Background: IDS & Reinforcement Learning
+Deep Q-Learning Explained
+Proposed System
+Data Preprocessing
+Experimental Setup
+Results & Evaluation
+Discussion
+Conclusion & Future Work
+Q&A
+🗣️ Speech Note: "Here is the roadmap of our presentation. We'll begin with a brief introduction to the problem and explain why it matters. Then, we’ll walk through our objectives, the key background concepts of IDS and reinforcement learning, and how Deep Q-Learning works. We'll move on to the design of our system, the preprocessing pipeline, the experimental setup, and finally discuss the results, conclusions, and future work."
+
+Slide 3: Introduction
+Cybersecurity is increasingly challenged by sophisticated DoS/DDoS attacks
+Intrusion Detection Systems (IDS) are essential for detecting such attacks
+Traditional IDS struggle with zero-day and evolving threats
+We propose a Deep Q-Learning (DQN) based detection method
+🗣️ Speech Note: "Denial-of-Service and Distributed Denial-of-Service attacks have become major threats to online services. They can bring down entire infrastructures and cause massive financial and data losses. Traditional Intrusion Detection Systems are essential but often fall short when facing new or evolving threats. That’s why we focused on developing a learning-based IDS using Deep Q-Learning to improve adaptability and accuracy."
+
+Slide 4: Problem Statement & Motivation
+Traditional IDS:
+Lack adaptability
+High false positives
+Poor real-time performance
+Motivation:
+Need for learning-based IDS
+RL models adapt over time
+DQN can learn optimal detection policy
+🗣️ Speech Note: "The main problem with many IDS systems today is their inability to adapt once deployed. They rely on static rules and signatures. As attacks evolve, these systems become less effective. This motivates us to explore a reinforcement learning-based IDS that doesn’t just memorize known attacks but learns and improves over time. DQN, in particular, gives us the ability to model and optimize such a learning agent."
+
+Slide 5: Objectives
+Study DoS attacks and IDS fundamentals
+Understand Reinforcement Learning & DQN
+Design and implement MLP and CNN based DQN architectures
+Preprocess and prepare CIC-DDoS2019 dataset
+Evaluate detection performance using key metrics
+🗣️ Speech Note: "Our goal was both to deepen our theoretical understanding and to apply that knowledge in practice. We studied the landscape of DoS attacks, reviewed how IDS typically work, learned about reinforcement learning in depth, and applied it using both MLP and CNN-based DQN architectures. We also focused on data preparation and thorough evaluation using metrics like accuracy and F1-score."
+
+Slide 6: IDS Background
+Signature-based: Fast but ineffective against novel attacks
+Anomaly-based: Detects unknown attacks but higher false alarms
+Hybrid: Combination of both
+IDS Architecture: Sensor → Analysis → Database → Response
+🗣️ Speech Note: "Traditional IDS approaches include signature-based and anomaly-based detection. Signature-based methods are fast but can’t detect new attacks. Anomaly-based systems are more flexible but can produce many false positives. In this context, machine learning-based anomaly detection can offer a better balance—more intelligent and adaptable detection with fewer false alarms."
+
+Slide 7: Reinforcement Learning Background
+RL is defined as a learning paradigm where agents learn to maximize long-term rewards by interacting with an environment.
+Formally modeled using a Markov Decision Process (MDP):
+A tuple where:
+: Set of states
+: Set of actions
+: Transition probability function
+: Expected reward function
+: Discount factor
+The goal is to find an optimal policy that maximizes the expected cumulative reward:
+The state-value function is defined as:
+The action-value (Q) function:
+🗣️ Speech Note: "In reinforcement learning, the agent operates within a Markov Decision Process, where it learns to make a sequence of decisions that maximize cumulative rewards. The mathematical objective is to derive an optimal policy that defines the best action in each state. We evaluate policies using the value functions: the state-value function gives the expected return from a state, and the action-value function measures expected return starting from a state and action. These equations are the foundation of all reinforcement learning algorithms."
+
+Slide 8: Deep Q-Learning (DQN)
+Q-learning is an off-policy TD control algorithm. The Q-value update rule is:
+In DQN, is approximated with a neural network , where are the network weights.
+DQN introduces:
+Experience Replay: stores tuples in buffer , sampled uniformly
+Target Network: is periodically updated to stabilize training
+Loss Function: where
+🗣️ Speech Note: "DQN builds on the Q-learning update rule by using a deep neural network to generalize over large state spaces. Instead of updating Q-values directly, we minimize the error between the predicted Q-value and a target value calculated using a frozen target network. Experience replay improves data efficiency and stability by breaking correlations between consecutive samples. This structure allows DQN to scale reinforcement learning to high-dimensional problems, like network traffic classification."
+
+Slide 10: Data Preprocessing
+Feature Scaling:
+Each feature is scaled using min-max normalization:
+Feature Importance:
+Ranked using Random Forest Gini index: where is the probability of class
+Class Balancing:
+Random undersampling method applied:
+🗣️ Speech Note: "To prepare the data, we scaled all features to the same range using Min-Max normalization to ensure that the neural network treats each input dimension equally. Then, we selected the most important features using the Random Forest algorithm, which ranks features based on the Gini impurity score. Finally, because the dataset was imbalanced, we applied undersampling to the majority class so that our training process was not biased toward benign traffic."
+
+Slide 11: DQN Architectures
+MLP Model:
+3 fully connected layers: ReLU activations, output layer for Q-values
+CNN Model:
+Input reshaped to matrix (e.g., 9×9)
+Conv2D → MaxPool → Flatten → Dense
+Huber Loss function used:
+🗣️ Speech Note: "We implemented two architectures. The Multi-Layer Perceptron is a basic feedforward neural network suitable for tabular inputs. The Convolutional Neural Network was designed to leverage spatial relationships between features by reshaping them into a 2D matrix. This allowed the model to learn local patterns between features. For training stability, we used the Huber loss, which behaves like MSE for small errors but is less sensitive to outliers, combining the benefits of MSE and MAE."
+
+Slide 12: Experimental Setup
+Dataset: CIC-DDoS2019
+Framework: Python, PyTorch
+Hyperparameters:
+Learning rate: 0.001
+Gamma: 0.95
+Epsilon decay: from 1.0 to 0.01
+Metrics: Accuracy, Precision, Recall, F1-Score
+🗣️ Speech Note: "We used PyTorch to implement our models. Our learning rate was tuned to ensure convergence. The gamma value encouraged the agent to focus on long-term rewards. We used standard metrics such as accuracy, precision, recall, and F1-score to evaluate performance."
+
+Slide 13: Results - MLP vs CNN vs DDQN
+Model
+Accuracy
+Precision
+Recall
+F1-Score
+Time
+MLP-DQN
+93%
+90%
+92%
+91%
+Fast
+CNN-DQN
+96%
+94%
+95%
+94%
+Mod.
+DDQN
+97%
+96%
+95%
+95%
+Slow
+
+🗣️ Speech Note: "Here are the performance comparisons. CNN-DQN outperformed the MLP in every metric due to its ability to extract spatial features. The Double DQN showed further gains in precision and stability, although it took more time to train."
+
+Slide 14: Discussion
+DQN successfully detects binary DoS patterns
+CNN improves feature interaction learning
+Double DQN reduces Q-value overestimation
+Trade-off: Performance vs Complexity
+🗣️ Speech Note: "This experiment showed that Deep Q-Learning is a promising approach for adaptive DoS detection. CNNs add better feature learning, and DDQN improves Q-value estimation. Still, there’s always a trade-off between accuracy and resource cost."
+
+Slide 15: Conclusion
+DQN is effective for adaptive DoS attack detection
+Combines machine learning with autonomous behavior
+Significantly improves accuracy and responsiveness over traditional IDS
+🗣️ Speech Note: "In conclusion, our DQN-based approach significantly improves the adaptability and effectiveness of IDS systems. It learns from interaction, handles real-world traffic features, and adapts to new attack patterns."
+
+Slide 16: Future Work
+Extend to multi-class attack types
+Apply continuous/online RL
+Real-time deployment on network hardware
+Try transformers or Graph Neural Networks (GNNs)
+🗣️ Speech Note: "Future directions include detecting multiple types of attacks, deploying the system in real-time settings, and experimenting with more advanced models like transformers or GNNs for relational traffic data."
+
+Slide 17: Acknowledgements
+Supervisor: Prof. Brahim Sahmadi
+Thanks to friends, family, and faculty
+🗣️ Speech Note: "We want to thank our supervisor, Professor Brahim Sahmadi, for his continuous support, and also our families and peers who encouraged us throughout this journey."
+
+Slide 18: Questions
+"Thank you for your attention. We welcome your questions."
+🗣️ Speech Note: "This brings us to the end of our presentation. We are open to any questions or feedback. Thank you."
+
+
+
+
+
+

@@ -230,19 +230,29 @@ class ModelComparison:
         """Compare a specific metric across all models"""
         plt.figure(figsize=(12, 6))
         
+        has_data_to_plot = False
         for model_name, df in self.metrics_data.items():
-            if metric in df.columns:
-                # Get the training phase data
-                train_data = df[df['phase'] == 'train'][metric] if 'phase' in df.columns else df[metric]
-                if not train_data.empty:
-                    plt.plot(train_data, label=f'{model_name} (Train)')
+            if df.empty:
+                continue
+
+            for phase in ['train', 'val']:
+                # Construct the column name based on phase and metric
+                col_name = f"{phase}_{metric}"
                 
-                # Get the validation phase data if available
-                if 'phase' in df.columns:
-                    val_data = df[df['phase'] == 'val'][metric]
-                    if not val_data.empty:
-                        plt.plot(val_data, label=f'{model_name} (Val)')
+                # Check if this column exists in the dataframe
+                if col_name in df.columns:
+                    # Get the series, drop NaN values to avoid plotting gaps
+                    series = df[col_name].dropna()
+                    if not series.empty:
+                        # Plot the data
+                        plt.plot(series.values, label=f'{model_name} ({phase.capitalize()})')
+                        has_data_to_plot = True
         
+        # Only save the plot if there is data
+        if not has_data_to_plot:
+            plt.close()  # Close the empty plot
+            return None
+
         plt.title(f'{metric.replace("_", " ").title()} Comparison')
         plt.xlabel('Epoch')
         plt.ylabel(metric.replace('_', ' ').title())

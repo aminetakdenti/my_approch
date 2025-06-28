@@ -371,4 +371,48 @@ class DoubleCNNTrainer:
             print(f"Current learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             print(f"Current epsilon: {self.epsilon:.4f}")
         
+        # After training, run final evaluation on validation set if available
+        if val_loader is not None:
+            test_predictions = []
+            test_targets = []
+            self.model.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    predictions, _ = self.evaluate(inputs, targets)
+                    test_predictions.extend(predictions)
+                    test_targets.extend(targets.numpy())
+            final_accuracy = np.mean(np.array(test_predictions) == np.array(test_targets))
+            final_precision = precision_score(test_targets, test_predictions, average='weighted', zero_division=0)
+            final_recall = recall_score(test_targets, test_predictions, average='weighted', zero_division=0)
+            final_f1 = f1_score(test_targets, test_predictions, average='weighted', zero_division=0)
+        else:
+            final_accuracy = final_precision = final_recall = final_f1 = None
+            test_predictions = test_targets = []
+
+        # Save extended summary with hyperparameters and final metrics
+        summary = {
+            'model_name': 'double_dqn_cnn',
+            'input_channels': self.model.input_channels,
+            'height': self.model.height,
+            'width': self.model.width,
+            'output_dim': self.model.fc2.out_features,
+            'total_params': sum(p.numel() for p in self.model.parameters()),
+            'trainable_params': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+            'LEARNING_RATE': LEARNING_RATE,
+            'EPSILON_START': EPSILON_START,
+            'EPSILON_END': EPSILON_END,
+            'EPSILON_DECAY': EPSILON_DECAY,
+            'LAMBDA': LAMBDA,
+            'EPOCHS': EPOCHS,
+            'BATCH_SIZE': BATCH_SIZE,
+            'TRAIN_SPLIT_PERCENT': TRAIN_SPLIT_PERCENT,
+            'EARLY_STOPPING_PATIENCE': EARLY_STOPPING_PATIENCE,
+            'TARGET_UPDATE_FREQ': TARGET_UPDATE_FREQ,
+            'test_accuracy': final_accuracy,
+            'test_precision': final_precision,
+            'test_recall': final_recall,
+            'test_f1': final_f1
+        }
+        self.tracker.save_summary(summary)
+        
         return self.tracker.metrics_history['train_loss'], self.tracker.metrics_history['train_accuracy'], best_accuracy 
